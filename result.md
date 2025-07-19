@@ -1,5 +1,6 @@
 # YouTube Views Analysis Report
 
+
 ## Data Loading
 
 Data loaded successfully. Shape: (6677, 14)
@@ -12,13 +13,16 @@ Tags data type: object
 
 Sample Tags values: ['Google, developers, pr_pr: Google for Developers;, Purpose: Learn;, Campaign: ;, Video Type:G4D SV: Educational ;, ct: ;;, gds:Yes;', 'Google, developers, pr_pr: Google for Developers;, Purpose: Learn;, Campaign: ;, Video Type:G4D SV: Comedic skits;, ct: ; ;, gds:Yes;', 'Google, developers, pr_pr: Google for Developers;, Purpose: Learn;, Video Type:DevByte;, ct: ; ;, gds:N/A;', 'Google, developers, pr_pr: Google for Developers;, Purpose: Influence;, Campaign: ;, Video Type:G4D SV: Educational ;, ct: ; ;, gds:Yes;', 'Google, developers, pr_pr: Google for Developers;, Purpose: Learn;, Campaign: ;, Video Type:G4D SV: Comedic skits;, ct: ; ;, gds:Yes;']
 
+
 ## Analysis Pipeline Overview
 
 This report contains a comprehensive analysis of YouTube video performance data using machine learning techniques including PCA and SVM.
 
+
 ## Exploratory Data Analysis
 
 Dataset shape: (6677, 14)
+
 
 ### Column Information
 
@@ -40,6 +44,7 @@ Tags                       object
 Thumbnail URL              object
 ```
 
+
 ### Basic Statistics
 
 ```
@@ -54,6 +59,7 @@ min    0.000000e+00      0.000000       0.000000        1.000000              2.
 max    4.607929e+07  57366.000000    1829.000000    41219.000000            248.940000              160.230000
 ```
 
+
 ### Missing Values
 
 ```
@@ -63,6 +69,7 @@ Tags    45
 ![Figure 1](pictures/eda_overview_01.png)
 
 ![Figure 2](pictures/correlation_matrix_02.png)
+
 
 ### Feature Correlations
 
@@ -75,6 +82,7 @@ Duration (sec)           -0.007138    0.014452       0.001014        1.000000   
 Thumbnail Brightness      0.001028   -0.003167       0.001049        0.035133              1.000000                0.000946
 Thumbnail Colorfulness   -0.000026    0.047687       0.026373       -0.064279              0.000946                1.000000
 ```
+
 
 ## Feature Engineering
 
@@ -96,7 +104,9 @@ Thumbnail Colorfulness   -0.000026    0.047687       0.026373       -0.064279   
 
 Feature engineering completed. Final shape: (6677, 24)
 
+
 ## Principal Component Analysis (PCA)
+
 
 ### Feature Preparation
 
@@ -107,6 +117,7 @@ Features selected for analysis: ['Like Count', 'Comment Count', 'Duration (sec)'
 Data types after conversion: [dtype('int64') dtype('float64') dtype('int32')]
 
 All features successfully converted to numeric
+
 
 ### Explained Variance Analysis
 
@@ -137,6 +148,7 @@ PC16: 0.000 (0.0%) | Cumulative: 1.000 (100.0%)
 
 ![Figure 3](pictures/pca_variance_03.png)
 
+
 ### Feature Loadings in Principal Components
 
 ```
@@ -161,7 +173,9 @@ title_length                  -0.004489 -0.030807  0.058540  0.418339 -0.282627
 
 ![Figure 4](pictures/pca_loadings_04.png)
 
+
 ## SVM Regression Analysis
+
 
 ### Feature Preparation
 
@@ -172,6 +186,7 @@ Features selected for analysis: ['Like Count', 'Comment Count', 'Duration (sec)'
 Data types after conversion: [dtype('int64') dtype('float64') dtype('int32')]
 
 All features successfully converted to numeric
+
 
 ### Model Training
 
@@ -185,6 +200,7 @@ Best parameters: {'C': 10, 'gamma': 'scale', 'kernel': 'rbf'}
 
 Cross-validation R² scores: 0.619 (+/- 0.084)
 
+
 ### Regression Results
 
 ```
@@ -196,7 +212,9 @@ Testing R²: 0.6560
 
 ![Figure 5](pictures/svm_regression_05.png)
 
+
 ## SVM Classification Analysis
+
 
 ### Feature Preparation
 
@@ -208,6 +226,7 @@ Data types after conversion: [dtype('int64') dtype('float64') dtype('int32')]
 
 All features successfully converted to numeric
 
+
 ### Model Training
 
 Performing grid search for SVM classification...
@@ -218,12 +237,14 @@ Parameter grid: {'C': [1, 10, 100], 'gamma': ['scale', 0.01, 0.1], 'kernel': ['r
 
 Best parameters: {'C': 100, 'gamma': 'scale', 'kernel': 'linear'}
 
+
 ### Classification Results
 
 ```
 Training Accuracy: 0.9798
 Testing Accuracy: 0.9760
 ```
+
 
 ### Classification Report
 
@@ -242,47 +263,51 @@ weighted avg       0.98      0.98      0.98      1335
 
 ![Figure 6](pictures/svm_classification_06.png)
 
+
 ## Key Factors Analysis
 
-### Key factors by Principal Component
+
+### Key factors by Principal Component:
 
 PC1 (Explains 18.9% of variance):
 
-- engagement_score: 0.577
+  - engagement_score: 0.577
 
-- like_to_view_ratio: 0.576
+  - like_to_view_ratio: 0.576
 
-- comment_to_view_ratio: 0.536
+  - comment_to_view_ratio: 0.536
 
-- Duration (sec): 0.198
+  - Duration (sec): 0.198
 
-- Video Length Category_encoded: 0.073
+  - Video Length Category_encoded: 0.073
 
 PC2 (Explains 11.9% of variance):
 
-- Like Count: 0.568
+  - Like Count: 0.568
 
-- Comment Count: 0.559
+  - Comment Count: 0.559
 
-- Tags: 0.358
+  - Tags: 0.358
 
-- Thumbnail Colorfulness: 0.270
+  - Thumbnail Colorfulness: 0.270
 
-- Video Length Category_encoded: 0.250
+  - Video Length Category_encoded: 0.250
 
 PC3 (Explains 11.1% of variance):
 
-- Video Length Category_encoded: 0.422
+  - Video Length Category_encoded: 0.422
 
-- Comment Count: 0.404
+  - Comment Count: 0.404
 
-- Like Count: 0.392
+  - Like Count: 0.392
 
-- Duration (sec): 0.371
+  - Duration (sec): 0.371
 
-- Person in Thumbnail: 0.367
+  - Person in Thumbnail: 0.367
+
 
 ## Recommendations for Content Creators
+
 
 ### Feature Preparation
 
@@ -294,7 +319,8 @@ Data types after conversion: [dtype('int64') dtype('float64') dtype('int32')]
 
 All features successfully converted to numeric
 
-### Top factors correlated with view count
+
+### Top factors correlated with view count:
 
 ```
   - Like Count: 0.216
@@ -309,7 +335,8 @@ All features successfully converted to numeric
   - comment_to_view_ratio: 0.002
 ```
 
-### Actionable Recommendations
+
+### Actionable Recommendations:
 
 1. Focus on thumbnail optimization - brightness and colorfulness show strong correlation with views
 
@@ -325,6 +352,7 @@ All features successfully converted to numeric
 
 7. Maintain consistency in content quality and posting schedule
 
+
 ## Analysis Summary
 
 ```
@@ -335,4 +363,3 @@ All features successfully converted to numeric
 - Generated 7 actionable recommendations for content creators
 ```
 
-Analysis completed successfully! All results and visualizations have been saved to this report.

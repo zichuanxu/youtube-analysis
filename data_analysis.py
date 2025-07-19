@@ -605,8 +605,6 @@ Testing Accuracy: {test_accuracy:.4f}"""
 - Generated {len(recommendations)} actionable recommendations for content creators"""
         self.write_to_output(summary_text, 'code')
 
-        self.write_to_output("Analysis completed successfully! All results and visualizations have been saved to this report.")
-
         return {
             'pca_results': key_factors,
             'regression_results': reg_results,
