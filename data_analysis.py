@@ -9,9 +9,13 @@ from sklearn.model_selection import train_test_split, cross_val_score, GridSearc
 from sklearn.metrics import mean_squared_error, r2_score, classification_report, confusion_matrix
 from datetime import datetime
 from config import OUTPUT_CSV_FILE
+import os
 
 import warnings
 warnings.filterwarnings('ignore')
+
+# Ensure pictures directory exists
+os.makedirs('pictures', exist_ok=True)
 
 class YouTubeViewsAnalyzer:
     def __init__(self, data_path=None, data_df=None):
@@ -32,14 +36,42 @@ class YouTubeViewsAnalyzer:
         self.scaler = StandardScaler()
         self.svm_regressor = None
         self.svm_classifier = None
+        self.output_file = 'result.md'
+        self.figure_counter = 1
+
+        # Initialize the output file
+        with open(self.output_file, 'w', encoding='utf-8') as f:
+            f.write("# YouTube Views Analysis Report\n\n")
+
+    def write_to_output(self, content, section_type='text'):
+        """Write content to the output markdown file"""
+        with open(self.output_file, 'a', encoding='utf-8') as f:
+            if section_type == 'header':
+                f.write(f"\n## {content}\n\n")
+            elif section_type == 'subheader':
+                f.write(f"\n### {content}\n\n")
+            elif section_type == 'code':
+                f.write(f"```\n{content}\n```\n\n")
+            elif section_type == 'image':
+                f.write(f"![Figure {self.figure_counter}]({content})\n\n")
+                self.figure_counter += 1
+            else:
+                f.write(f"{content}\n\n")
+
+    def save_figure(self, filename_prefix):
+        """Save the current matplotlib figure to the pictures directory"""
+        filename = f"pictures/{filename_prefix}_{self.figure_counter:02d}.png"
+        plt.savefig(filename, dpi=300, bbox_inches='tight')
+        self.write_to_output(filename, 'image')
+        plt.close()  # Close the figure to free memory
 
     def load_data(self, file_path):
         """Load data from CSV file"""
         self.df = pd.read_csv(file_path)
-        print(f"Data loaded successfully. Shape: {self.df.shape}")
 
-        # Display basic info about the loaded data
-        print(f"Columns: {list(self.df.columns)}")
+        self.write_to_output("Data Loading", 'header')
+        self.write_to_output(f"Data loaded successfully. Shape: {self.df.shape}")
+        self.write_to_output(f"Columns: {list(self.df.columns)}")
 
         # Check for expected columns
         expected_cols = ['Video ID', 'Title', 'Channel Name', 'Published At (JST)',
@@ -49,30 +81,37 @@ class YouTubeViewsAnalyzer:
 
         missing_cols = [col for col in expected_cols if col not in self.df.columns]
         if missing_cols:
-            print(f"Warning: Missing expected columns: {missing_cols}")
+            self.write_to_output(f"Warning: Missing expected columns: {missing_cols}")
 
         # Show sample of problematic columns
         if 'Person in Thumbnail' in self.df.columns:
-            print(f"Person in Thumbnail unique values: {self.df['Person in Thumbnail'].unique()}")
+            self.write_to_output(f"Person in Thumbnail unique values: {self.df['Person in Thumbnail'].unique()}")
 
         if 'Tags' in self.df.columns:
-            print(f"Tags data type: {self.df['Tags'].dtype}")
-            print(f"Sample Tags values: {self.df['Tags'].head()}")
+            self.write_to_output(f"Tags data type: {self.df['Tags'].dtype}")
+            self.write_to_output(f"Sample Tags values: {self.df['Tags'].head().tolist()}")
 
         return self.df
 
     def exploratory_data_analysis(self):
         """Perform exploratory data analysis"""
-        print("=== EXPLORATORY DATA ANALYSIS ===")
-        print(f"Dataset shape: {self.df.shape}")
-        print(f"\nColumn information:")
-        print(self.df.info())
+        self.write_to_output("Exploratory Data Analysis", 'header')
+        self.write_to_output(f"Dataset shape: {self.df.shape}")
 
-        print(f"\nBasic statistics:")
-        print(self.df.describe())
+        # Column information
+        self.write_to_output("Column Information", 'subheader')
+        info_str = f"Data types:\n{self.df.dtypes.to_string()}"
+        self.write_to_output(info_str, 'code')
 
-        print(f"\nMissing values:")
-        print(self.df.isnull().sum())
+        # Basic statistics
+        self.write_to_output("Basic Statistics", 'subheader')
+        self.write_to_output(self.df.describe().to_string(), 'code')
+
+        # Missing values
+        self.write_to_output("Missing Values", 'subheader')
+        missing_values = self.df.isnull().sum()
+        missing_str = missing_values[missing_values > 0].to_string() if missing_values.sum() > 0 else "No missing values found"
+        self.write_to_output(missing_str, 'code')
 
         # Visualizations
         fig, axes = plt.subplots(2, 2, figsize=(15, 12))
@@ -104,8 +143,9 @@ class YouTubeViewsAnalyzer:
         axes[1, 1].set_yscale('log')
 
         plt.tight_layout()
-        plt.show()
+        self.save_figure('eda_overview')
 
+        # Correlation matrix
         numerical_cols = ['View Count', 'Like Count', 'Comment Count', 'Duration (sec)',
                          'Thumbnail Brightness', 'Thumbnail Colorfulness']
 
@@ -115,13 +155,17 @@ class YouTubeViewsAnalyzer:
                    square=True, linewidths=0.5)
         plt.title('Feature Correlation Matrix')
         plt.tight_layout()
-        plt.show()
+        self.save_figure('correlation_matrix')
+
+        # Write correlation values to output
+        self.write_to_output("Feature Correlations", 'subheader')
+        self.write_to_output(correlation_matrix.to_string(), 'code')
 
         return self.df
 
     def feature_engineering(self):
         """Engineer features from the raw data"""
-        print("=== FEATURE ENGINEERING ===")
+        self.write_to_output("Feature Engineering", 'header')
 
         df_processed = self.df.copy()
 
@@ -131,33 +175,34 @@ class YouTubeViewsAnalyzer:
             df_processed['publish_hour'] = df_processed['Published At (JST)'].dt.hour
             df_processed['publish_day_of_week'] = df_processed['Published At (JST)'].dt.dayofweek
             df_processed['publish_month'] = df_processed['Published At (JST)'].dt.month
+            self.write_to_output("✓ Created time-based features: publish_hour, publish_day_of_week, publish_month")
 
         # Handle 'Person in Thumbnail' - convert Yes/No to 1/0
         if 'Person in Thumbnail' in df_processed.columns:
             df_processed['Person in Thumbnail'] = df_processed['Person in Thumbnail'].map({'Yes': 1, 'No': 0})
-            # Fill any NaN values with 0
             df_processed['Person in Thumbnail'] = df_processed['Person in Thumbnail'].fillna(0)
+            self.write_to_output("✓ Converted 'Person in Thumbnail' to binary (1/0)")
 
         # Handle Tags - convert to number of tags if it's a string
         if 'Tags' in df_processed.columns:
-            # Check if Tags column contains strings (like comma-separated tags)
             if df_processed['Tags'].dtype == 'object':
-                # Count number of tags by splitting on commas
                 df_processed['Tags'] = df_processed['Tags'].fillna('')
                 df_processed['Tags'] = df_processed['Tags'].apply(
                     lambda x: len(x.split(',')) if isinstance(x, str) and x.strip() else 0
                 )
-            # Ensure it's numeric
             df_processed['Tags'] = pd.to_numeric(df_processed['Tags'], errors='coerce').fillna(0)
+            self.write_to_output("✓ Converted Tags to count of tags")
 
         # Create engagement ratio features
         df_processed['like_to_view_ratio'] = df_processed['Like Count'] / (df_processed['View Count'] + 1)
         df_processed['comment_to_view_ratio'] = df_processed['Comment Count'] / (df_processed['View Count'] + 1)
         df_processed['engagement_score'] = (df_processed['Like Count'] + df_processed['Comment Count']) / (df_processed['View Count'] + 1)
+        self.write_to_output("✓ Created engagement ratio features: like_to_view_ratio, comment_to_view_ratio, engagement_score")
 
         # Title length feature (if title is available)
         if 'Title' in df_processed.columns:
             df_processed['title_length'] = df_processed['Title'].str.len()
+            self.write_to_output("✓ Created title_length feature")
 
         # Handle categorical variables
         le = LabelEncoder()
@@ -166,16 +211,17 @@ class YouTubeViewsAnalyzer:
         for col in categorical_cols:
             if col in df_processed.columns:
                 df_processed[f'{col}_encoded'] = le.fit_transform(df_processed[col])
+                self.write_to_output(f"✓ Encoded categorical variable: {col}")
 
         # Create view category for classification
         view_percentiles = df_processed['View Count'].quantile([0.33, 0.67])
         df_processed['view_category'] = pd.cut(df_processed['View Count'],
                                              bins=[0, view_percentiles.iloc[0], view_percentiles.iloc[1], float('inf')],
                                              labels=['Low', 'Medium', 'High'])
+        self.write_to_output(f"✓ Created view categories: Low (<{view_percentiles.iloc[0]:.0f}), Medium ({view_percentiles.iloc[0]:.0f}-{view_percentiles.iloc[1]:.0f}), High (>{view_percentiles.iloc[1]:.0f})")
 
         self.processed_df = df_processed
-        print("Feature engineering completed.")
-        print(f"New features created. Final shape: {df_processed.shape}")
+        self.write_to_output(f"Feature engineering completed. Final shape: {df_processed.shape}")
 
         return df_processed
 
@@ -206,7 +252,8 @@ class YouTubeViewsAnalyzer:
         # Remove any features that don't exist
         available_features = [f for f in numerical_features if f in self.processed_df.columns]
 
-        print(f"Features selected for analysis: {available_features}")
+        self.write_to_output("Feature Preparation", 'subheader')
+        self.write_to_output(f"Features selected for analysis: {available_features}", 'code')
 
         # Prepare feature matrix and ensure all values are numeric
         X = self.processed_df[available_features].copy()
@@ -219,8 +266,12 @@ class YouTubeViewsAnalyzer:
         X = X.fillna(0)
 
         # Verify all values are numeric
-        print(f"Data types after conversion: {X.dtypes.unique()}")
-        print(f"Any non-numeric values remaining: {X.select_dtypes(include=['object']).columns.tolist()}")
+        self.write_to_output(f"Data types after conversion: {X.dtypes.unique()}")
+        non_numeric = X.select_dtypes(include=['object']).columns.tolist()
+        if non_numeric:
+            self.write_to_output(f"Non-numeric values remaining: {non_numeric}")
+        else:
+            self.write_to_output("All features successfully converted to numeric")
 
         y_regression = self.processed_df['View Count']
         y_classification = self.processed_df['view_category']
@@ -229,7 +280,7 @@ class YouTubeViewsAnalyzer:
 
     def perform_pca_analysis(self, n_components=None):
         """Perform Principal Component Analysis"""
-        print("=== PCA ANALYSIS ===")
+        self.write_to_output("Principal Component Analysis (PCA)", 'header')
 
         X, y_reg, y_class, feature_names = self.prepare_features_for_analysis()
 
@@ -248,8 +299,16 @@ class YouTubeViewsAnalyzer:
         explained_var_ratio = self.pca.explained_variance_ratio_
         cumulative_var_ratio = np.cumsum(explained_var_ratio)
 
-        print(f"Explained variance ratio by component: {explained_var_ratio}")
-        print(f"Cumulative explained variance: {cumulative_var_ratio}")
+        self.write_to_output("Explained Variance Analysis", 'subheader')
+        self.write_to_output(f"Number of components: {n_components}")
+
+        # Create explained variance table
+        variance_data = []
+        for i, (individual, cumulative) in enumerate(zip(explained_var_ratio, cumulative_var_ratio)):
+            variance_data.append(f"PC{i+1}: {individual:.3f} ({individual*100:.1f}%) | Cumulative: {cumulative:.3f} ({cumulative*100:.1f}%)")
+
+        self.write_to_output("Explained variance by component:", 'code')
+        self.write_to_output('\n'.join(variance_data), 'code')
 
         # Plot explained variance
         fig, axes = plt.subplots(1, 2, figsize=(15, 6))
@@ -271,7 +330,7 @@ class YouTubeViewsAnalyzer:
         axes[1].grid(True)
 
         plt.tight_layout()
-        plt.show()
+        self.save_figure('pca_variance')
 
         # Feature importance in principal components
         components_df = pd.DataFrame(
@@ -280,21 +339,21 @@ class YouTubeViewsAnalyzer:
             index=feature_names
         )
 
-        print("\nFeature loadings for first 5 principal components:")
-        print(components_df)
+        self.write_to_output("Feature Loadings in Principal Components", 'subheader')
+        self.write_to_output(components_df.to_string(), 'code')
 
         # Plot feature importance
         plt.figure(figsize=(12, 8))
         sns.heatmap(components_df.T, annot=True, cmap='coolwarm', center=0)
         plt.title('Feature Loadings in Principal Components')
         plt.tight_layout()
-        plt.show()
+        self.save_figure('pca_loadings')
 
         return X_pca, explained_var_ratio, components_df
 
     def svm_regression_analysis(self):
         """Perform SVM regression to predict view count"""
-        print("=== SVM REGRESSION ANALYSIS ===")
+        self.write_to_output("SVM Regression Analysis", 'header')
 
         X, y_reg, _, feature_names = self.prepare_features_for_analysis()
 
@@ -315,16 +374,20 @@ class YouTubeViewsAnalyzer:
             'kernel': ['rbf', 'linear']
         }
 
-        print("Performing grid search for SVM regression...")
+        self.write_to_output("Model Training", 'subheader')
+        self.write_to_output("Performing grid search for SVM regression...")
+        self.write_to_output(f"Parameter grid: {param_grid}", 'code')
+
         svm_reg = SVR()
-        grid_search = GridSearchCV(svm_reg, param_grid, cv=3, scoring='neg_mean_squared_error', n_jobs=2, verbose=1)
+        grid_search = GridSearchCV(svm_reg, param_grid, cv=3, scoring='neg_mean_squared_error', n_jobs=2, verbose=0)
         grid_search.fit(X_train_scaled, y_train)
 
         self.svm_regressor = grid_search.best_estimator_
-        print(f"Best parameters: {grid_search.best_params_}")
+        self.write_to_output(f"Best parameters: {grid_search.best_params_}")
 
         cv_scores = cross_val_score(self.svm_regressor, X_train_scaled, y_train, cv=5, scoring='r2')
-        print(f"Cross-validation R² scores: {cv_scores.mean():.3f} (+/- {cv_scores.std() * 2:.3f})")
+        self.write_to_output(f"Cross-validation R² scores: {cv_scores.mean():.3f} (+/- {cv_scores.std() * 2:.3f})")
+
         # Make predictions
         y_pred_train = self.svm_regressor.predict(X_train_scaled)
         y_pred_test = self.svm_regressor.predict(X_test_scaled)
@@ -335,11 +398,12 @@ class YouTubeViewsAnalyzer:
         train_r2 = r2_score(y_train, y_pred_train)
         test_r2 = r2_score(y_test, y_pred_test)
 
-        print(f"\nRegression Results:")
-        print(f"Training MSE: {train_mse:.4f}")
-        print(f"Testing MSE: {test_mse:.4f}")
-        print(f"Training R²: {train_r2:.4f}")
-        print(f"Testing R²: {test_r2:.4f}")
+        self.write_to_output("Regression Results", 'subheader')
+        results_text = f"""Training MSE: {train_mse:.4f}
+Testing MSE: {test_mse:.4f}
+Training R²: {train_r2:.4f}
+Testing R²: {test_r2:.4f}"""
+        self.write_to_output(results_text, 'code')
 
         # Plot predictions vs actual
         plt.figure(figsize=(12, 5))
@@ -359,13 +423,13 @@ class YouTubeViewsAnalyzer:
         plt.title(f'Test Set - R² = {test_r2:.3f}')
 
         plt.tight_layout()
-        plt.show()
+        self.save_figure('svm_regression')
 
         return self.svm_regressor, (train_mse, test_mse, train_r2, test_r2)
 
     def svm_classification_analysis(self):
         """Perform SVM classification for view categories"""
-        print("=== SVM CLASSIFICATION ANALYSIS ===")
+        self.write_to_output("SVM Classification Analysis", 'header')
 
         X, _, y_class, feature_names = self.prepare_features_for_analysis()
 
@@ -389,13 +453,16 @@ class YouTubeViewsAnalyzer:
             'kernel': ['rbf', 'linear']
         }
 
-        print("Performing grid search for SVM classification...")
+        self.write_to_output("Model Training", 'subheader')
+        self.write_to_output("Performing grid search for SVM classification...")
+        self.write_to_output(f"Parameter grid: {param_grid}", 'code')
+
         svm_clf = SVC(random_state=42)
-        grid_search = GridSearchCV(svm_clf, param_grid, cv=3, scoring='accuracy', n_jobs=2, verbose=1)
+        grid_search = GridSearchCV(svm_clf, param_grid, cv=3, scoring='accuracy', n_jobs=2, verbose=0)
         grid_search.fit(X_train_scaled, y_train)
 
         self.svm_classifier = grid_search.best_estimator_
-        print(f"Best parameters: {grid_search.best_params_}")
+        self.write_to_output(f"Best parameters: {grid_search.best_params_}")
 
         # Make predictions
         y_pred_train = self.svm_classifier.predict(X_train_scaled)
@@ -405,13 +472,15 @@ class YouTubeViewsAnalyzer:
         train_accuracy = self.svm_classifier.score(X_train_scaled, y_train)
         test_accuracy = self.svm_classifier.score(X_test_scaled, y_test)
 
-        print(f"\nClassification Results:")
-        print(f"Training Accuracy: {train_accuracy:.4f}")
-        print(f"Testing Accuracy: {test_accuracy:.4f}")
+        self.write_to_output("Classification Results", 'subheader')
+        results_text = f"""Training Accuracy: {train_accuracy:.4f}
+Testing Accuracy: {test_accuracy:.4f}"""
+        self.write_to_output(results_text, 'code')
 
         # Classification report
-        print(f"\nClassification Report:")
-        print(classification_report(y_test, y_pred_test))
+        self.write_to_output("Classification Report", 'subheader')
+        class_report = classification_report(y_test, y_pred_test)
+        self.write_to_output(class_report, 'code')
 
         # Confusion matrix
         cm = confusion_matrix(y_test, y_pred_test)
@@ -422,15 +491,15 @@ class YouTubeViewsAnalyzer:
         plt.title('Confusion Matrix')
         plt.xlabel('Predicted')
         plt.ylabel('Actual')
-        plt.show()
+        self.save_figure('svm_classification')
 
         return self.svm_classifier, (train_accuracy, test_accuracy)
 
     def identify_key_factors(self):
         """Identify the key factors affecting YouTube views"""
-        print("=== KEY FACTORS ANALYSIS ===")
+        self.write_to_output("Key Factors Analysis", 'header')
 
-        # Get PCA results
+        # Get PCA results (this will be called again but PCA is already computed)
         X_pca, explained_var, components_df = self.perform_pca_analysis()
 
         # Get feature importance from the first few components
@@ -446,30 +515,27 @@ class YouTubeViewsAnalyzer:
                 'top_factors': loadings.head(5).to_dict()
             }
 
-        print("Key factors by Principal Component:")
+        self.write_to_output("Key factors by Principal Component:", 'subheader')
         for pc, info in key_factors.items():
-            print(f"\n{pc} (Explains {info['explained_variance']:.1%} of variance):")
+            self.write_to_output(f"{pc} (Explains {info['explained_variance']:.1%} of variance):")
             for factor, importance in info['top_factors'].items():
-                print(f"  - {factor}: {importance:.3f}")
+                self.write_to_output(f"  - {factor}: {importance:.3f}")
 
         return key_factors
 
     def generate_recommendations(self):
         """Generate recommendations for content creators"""
-        print("=== RECOMMENDATIONS FOR CONTENT CREATORS ===")
-
-        recommendations = []
-
-        # Based on PCA analysis
-        key_factors = self.identify_key_factors()
+        self.write_to_output("Recommendations for Content Creators", 'header')
 
         # Get correlation with view count
         X, y_reg, _, feature_names = self.prepare_features_for_analysis()
         correlations = X.corrwith(pd.Series(y_reg)).abs().sort_values(ascending=False)
 
-        print("\nTop factors correlated with view count:")
+        self.write_to_output("Top factors correlated with view count:", 'subheader')
+        correlation_text = []
         for factor, corr in correlations.head(10).items():
-            print(f"  - {factor}: {corr:.3f}")
+            correlation_text.append(f"  - {factor}: {corr:.3f}")
+        self.write_to_output('\n'.join(correlation_text), 'code')
 
         # Generate specific recommendations
         recommendations = [
@@ -482,16 +548,16 @@ class YouTubeViewsAnalyzer:
             "Maintain consistency in content quality and posting schedule"
         ]
 
-        print("\nRecommendations:")
+        self.write_to_output("Actionable Recommendations:", 'subheader')
         for i, rec in enumerate(recommendations, 1):
-            print(f"{i}. {rec}")
+            self.write_to_output(f"{i}. {rec}")
 
         return recommendations
 
     def run_complete_analysis(self):
         """Run the complete analysis pipeline"""
-        print("Starting YouTube Views Analysis")
-        print("=" * 50)
+        self.write_to_output("Analysis Pipeline Overview", 'header')
+        self.write_to_output("This report contains a comprehensive analysis of YouTube video performance data using machine learning techniques including PCA and SVM.")
 
         # Step 1: EDA
         self.exploratory_data_analysis()
@@ -500,7 +566,7 @@ class YouTubeViewsAnalyzer:
         self.feature_engineering()
 
         # Step 3: PCA Analysis
-        self.perform_pca_analysis()
+        X_pca, explained_var, components_df = self.perform_pca_analysis()
 
         # Step 4: SVM Regression
         reg_results = self.svm_regression_analysis()
@@ -508,14 +574,38 @@ class YouTubeViewsAnalyzer:
         # Step 5: SVM Classification
         clf_results = self.svm_classification_analysis()
 
-        # Step 6: Key factors identification
-        key_factors = self.identify_key_factors()
+        # Step 6: Key factors identification (this will reuse PCA results)
+        key_factors = {}
+        n_components_to_analyze = min(3, components_df.shape[1])
+
+        self.write_to_output("Key Factors Analysis", 'header')
+        for i in range(n_components_to_analyze):
+            pc_name = f'PC{i+1}'
+            loadings = components_df[pc_name].abs().sort_values(ascending=False)
+            key_factors[pc_name] = {
+                'explained_variance': explained_var[i],
+                'top_factors': loadings.head(5).to_dict()
+            }
+
+        self.write_to_output("Key factors by Principal Component:", 'subheader')
+        for pc, info in key_factors.items():
+            self.write_to_output(f"{pc} (Explains {info['explained_variance']:.1%} of variance):")
+            for factor, importance in info['top_factors'].items():
+                self.write_to_output(f"  - {factor}: {importance:.3f}")
 
         # Step 7: Recommendations
         recommendations = self.generate_recommendations()
 
-        print("\n" + "=" * 50)
-        print("Analysis completed successfully!")
+        # Final summary
+        self.write_to_output("Analysis Summary", 'header')
+        summary_text = f"""- Dataset analyzed: {self.df.shape[0]} videos with {self.df.shape[1]} features
+- PCA identified {len(key_factors)} key components explaining the variance
+- SVM regression achieved R² of {reg_results[1][3]:.3f} on test data
+- SVM classification achieved {clf_results[1][1]:.1%} accuracy on test data
+- Generated {len(recommendations)} actionable recommendations for content creators"""
+        self.write_to_output(summary_text, 'code')
+
+        self.write_to_output("Analysis completed successfully! All results and visualizations have been saved to this report.")
 
         return {
             'pca_results': key_factors,

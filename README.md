@@ -12,3 +12,15 @@ python data_collection.py
 
 python data_analysis.py
 ```
+
+## Project Structure
+
+```
+youtube-analysis/
+├── config.py                       # Config File
+├── data_analysis.py                # Data Analysis Code
+├── data_collection.py              # Data Collection Code
+├── result.md                       # Analysis Results
+├── youtube_video_data_advanced.csv # Collected data
+└── pictures/                       # Pictures of result
+```
