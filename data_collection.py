@@ -7,13 +7,16 @@ import os
 import re
 import requests
 import numpy as np
-from PIL import Image
+from PIL import Image, ImageDraw, ImageFont
 import io
 import cv2
+import pytesseract
+from collections import Counter
+import json
 from config import API_KEY, CHANNEL_ID, URL_INPUT_FILE, OUTPUT_CSV_FILE, CASCADE_FILE_PATH
 
 # --------------------------------------------------------------------------
-# Helper Functions (New/Improved)
+# Helper Functions
 # --------------------------------------------------------------------------
 
 def parse_iso8601_duration(duration_str):
@@ -44,10 +47,87 @@ def categorize_video_length(seconds):
     else:
         return "Long (> 20 min)"
 
-def analyze_thumbnail(image_url, face_cascade):
+def detect_text_in_image(image):
+    """Detects if there's text in the thumbnail image using OCR."""
+    try:
+        # Use pytesseract to detect text
+        text = pytesseract.image_to_string(image, config='--psm 8')
+        return 1 if text.strip() else 0
+    except:
+        return 0
+
+def detect_graphics_effects(cv_image):
+    """Detects graphic effects like borders, gradients, or overlays."""
+    try:
+        # Convert to HSV for better color analysis
+        hsv = cv2.cvtColor(cv_image, cv2.COLOR_BGR2HSV)
+
+        # Detect edges (potential graphics/borders)
+        gray = cv2.cvtColor(cv_image, cv2.COLOR_BGR2GRAY)
+        edges = cv2.Canny(gray, 50, 150)
+        edge_ratio = np.sum(edges > 0) / edges.size
+
+        # Check for high saturation areas (often indicates graphics)
+        high_sat = np.sum(hsv[:,:,1] > 200) / hsv[:,:,1].size
+
+        # Simple heuristic: if there are many edges or high saturation areas
+        return 1 if (edge_ratio > 0.1 or high_sat > 0.3) else 0
+    except:
+        return 0
+
+def extract_rgb_values(cv_image):
+    """Extract average RGB values from the thumbnail."""
+    try:
+        # Convert BGR to RGB
+        rgb_image = cv2.cvtColor(cv_image, cv2.COLOR_BGR2RGB)
+
+        # Calculate mean RGB values
+        r_mean = round(np.mean(rgb_image[:,:,0]), 2)
+        g_mean = round(np.mean(rgb_image[:,:,1]), 2)
+        b_mean = round(np.mean(rgb_image[:,:,2]), 2)
+
+        return r_mean, g_mean, b_mean
+    except:
+        return 'N/A', 'N/A', 'N/A'
+
+def detect_objects_basic(cv_image):
+    """Basic object detection using color and shape analysis."""
+    try:
+        # Convert to HSV for better object detection
+        hsv = cv2.cvtColor(cv_image, cv2.COLOR_BGR2HSV)
+
+        detected_objects = []
+
+        # Detect common colors that might indicate objects
+        # Red objects
+        red_mask1 = cv2.inRange(hsv, (0, 50, 50), (10, 255, 255))
+        red_mask2 = cv2.inRange(hsv, (170, 50, 50), (180, 255, 255))
+        red_mask = red_mask1 + red_mask2
+        if np.sum(red_mask) > 1000:  # Threshold for significant red area
+            detected_objects.append("red_object")
+
+        # Blue objects
+        blue_mask = cv2.inRange(hsv, (100, 50, 50), (130, 255, 255))
+        if np.sum(blue_mask) > 1000:
+            detected_objects.append("blue_object")
+
+        # Green objects
+        green_mask = cv2.inRange(hsv, (40, 50, 50), (80, 255, 255))
+        if np.sum(green_mask) > 1000:
+            detected_objects.append("green_object")
+
+        # Yellow objects
+        yellow_mask = cv2.inRange(hsv, (20, 50, 50), (40, 255, 255))
+        if np.sum(yellow_mask) > 1000:
+            detected_objects.append("yellow_object")
+
+        return detected_objects
+    except:
+        return []
+
+def analyze_thumbnail_advanced(image_url, face_cascade):
     """
-    Analyzes the thumbnail image and returns its brightness, colorfulness,
-    and whether a person is present.
+    Enhanced thumbnail analysis including all research-based features.
     """
     try:
         response = requests.get(image_url, timeout=10)
@@ -56,11 +136,11 @@ def analyze_thumbnail(image_url, face_cascade):
         pil_image = Image.open(io.BytesIO(response.content))
         cv_image = cv2.cvtColor(np.array(pil_image), cv2.COLOR_RGB2BGR)
 
-        # 1. Brightness
+        # Original features
         gray_image = cv2.cvtColor(cv_image, cv2.COLOR_BGR2GRAY)
         brightness = round(gray_image.mean(), 2)
 
-        # 2. Colorfulness
+        # Colorfulness
         (B, G, R) = cv2.split(cv_image.astype("float"))
         rg = np.absolute(R - G)
         yb = np.absolute(0.5 * (R + G) - B)
@@ -70,15 +150,65 @@ def analyze_thumbnail(image_url, face_cascade):
         meanRoot = np.sqrt((rbMean ** 2) + (ybMean ** 2))
         colorfulness = round(stdRoot + (0.3 * meanRoot), 2)
 
-        # 3. Person Detection
+        # Person detection
         faces = face_cascade.detectMultiScale(
             gray_image, scaleFactor=1.1, minNeighbors=5, minSize=(30, 30))
-        person_present = "Yes" if len(faces) > 0 else "No"
+        person_present = 1 if len(faces) > 0 else 0
 
-        return brightness, colorfulness, person_present
+        # NEW FEATURES based on research
+
+        # RGB values
+        r_mean, g_mean, b_mean = extract_rgb_values(cv_image)
+
+        # Text detection
+        text_present = detect_text_in_image(pil_image)
+
+        # Graphics effects detection
+        graphics_present = detect_graphics_effects(cv_image)
+
+        # Basic object detection
+        detected_objects = detect_objects_basic(cv_image)
+
+        # Create image tags summary
+        image_tags = []
+        if person_present:
+            image_tags.append("person")
+        if text_present:
+            image_tags.append("text")
+        if graphics_present:
+            image_tags.append("graphics")
+        image_tags.extend(detected_objects)
+
+        # Get top 5 most confident tags (simplified for basic detection)
+        category_tags = image_tags[:5] if len(image_tags) >= 5 else image_tags
+
+        return {
+            'brightness': brightness,
+            'colorfulness': colorfulness,
+            'person': person_present,
+            'r_mean': r_mean,
+            'g_mean': g_mean,
+            'b_mean': b_mean,
+            'text': text_present,
+            'graphics': graphics_present,
+            'image_tags': ', '.join(image_tags) if image_tags else 'none',
+            'category_tags': ', '.join(category_tags) if category_tags else 'none'
+        }
 
     except Exception as e:
-        return 'N/A', 'N/A', 'N/A'
+        print(f"Error analyzing thumbnail {image_url}: {e}")
+        return {
+            'brightness': 'N/A',
+            'colorfulness': 'N/A',
+            'person': 0,
+            'r_mean': 'N/A',
+            'g_mean': 'N/A',
+            'b_mean': 'N/A',
+            'text': 0,
+            'graphics': 0,
+            'image_tags': 'N/A',
+            'category_tags': 'N/A'
+        }
 
 def load_face_cascade(file_path):
     """Loads or downloads the cascade classifier for face detection."""
@@ -126,13 +256,94 @@ def get_video_ids_from_channel(youtube, channel_id):
         print(f"An error occurred during an API request: {e}")
         return []
 
-def get_video_details(youtube, video_ids, face_cascade):
-    """Uses the YouTube Data API to get detailed information and thumbnail analysis results for a list of video IDs."""
+def get_channel_statistics(youtube, channel_id):
+    """Get channel-level statistics for brand/channel features."""
+    try:
+        channel_response = youtube.channels().list(
+            part='statistics,snippet',
+            id=channel_id
+        ).execute()
+
+        if channel_response.get("items"):
+            channel_data = channel_response['items'][0]
+            stats = channel_data.get('statistics', {})
+            snippet = channel_data.get('snippet', {})
+
+            return {
+                'subscriber_count': int(stats.get('subscriberCount', 0)),
+                'total_video_count': int(stats.get('videoCount', 0)),
+                'total_view_count': int(stats.get('viewCount', 0)),
+                'channel_created': snippet.get('publishedAt', ''),
+                'channel_title': snippet.get('title', '')
+            }
+    except Exception as e:
+        print(f"Error fetching channel statistics: {e}")
+
+    return {
+        'subscriber_count': 0,
+        'total_video_count': 0,
+        'total_view_count': 0,
+        'channel_created': '',
+        'channel_title': ''
+    }
+
+def calculate_channel_metrics(channel_stats, video_count):
+    """Calculate derived channel metrics."""
+    try:
+        total_views = channel_stats.get('total_view_count', 0)
+        total_videos = channel_stats.get('total_video_count', 1)  # Avoid division by zero
+
+        avg_views_per_video = round(total_views / total_videos, 2) if total_videos > 0 else 0
+
+        return {
+            'avg_views_per_video': avg_views_per_video,
+            'total_channel_views': total_views
+        }
+    except:
+        return {
+            'avg_views_per_video': 0,
+            'total_channel_views': 0
+        }
+
+def analyze_title_features(title):
+    """Analyze title characteristics that might influence views."""
+    try:
+        features = {
+            'title_length': len(title),
+            'title_word_count': len(title.split()),
+            'has_numbers': 1 if re.search(r'\d', title) else 0,
+            'has_caps': 1 if any(c.isupper() for c in title) else 0,
+            'has_question': 1 if '?' in title else 0,
+            'has_exclamation': 1 if '!' in title else 0,
+            'has_brackets': 1 if any(char in title for char in '()[]{}') else 0,
+        }
+
+        # Common clickbait words
+        clickbait_words = ['amazing', 'shocking', 'unbelievable', 'secret', 'hack', 'trick',
+                          'you won\'t believe', 'must see', 'incredible', 'insane', 'epic']
+        features['clickbait_score'] = sum(1 for word in clickbait_words if word.lower() in title.lower())
+
+        return features
+    except:
+        return {
+            'title_length': 0, 'title_word_count': 0, 'has_numbers': 0,
+            'has_caps': 0, 'has_question': 0, 'has_exclamation': 0,
+            'has_brackets': 0, 'clickbait_score': 0
+        }
+
+def get_video_details(youtube, video_ids, face_cascade, channel_id=None):
+    """Enhanced video details extraction with research-based features."""
     if not video_ids: return None
+
+    # Get channel statistics once for all videos
+    channel_stats = {}
+    if channel_id:
+        channel_stats = get_channel_statistics(youtube, channel_id)
+        print(f"Channel stats: {channel_stats['subscriber_count']} subscribers, {channel_stats['total_video_count']} videos")
 
     video_details_list = []
     total_videos = len(video_ids)
-    print(f"Fetching video details (Total: {total_videos})...")
+    print(f"Fetching enhanced video details (Total: {total_videos})...")
 
     for i in range(0, total_videos, 50):
         chunk_ids = video_ids[i:i+50]
@@ -147,30 +358,84 @@ def get_video_details(youtube, video_ids, face_cascade):
                 statistics = item.get("statistics", {})
                 content_details = item.get("contentDetails", {})
 
+                # Basic video info
                 duration_sec = parse_iso8601_duration(content_details.get("duration", "PT0S"))
                 length_category = categorize_video_length(duration_sec)
 
-                thumbnail_url = snippet.get("thumbnails", {}).get("high", {}).get("url")
-                brightness, colorfulness, person = analyze_thumbnail(thumbnail_url, face_cascade)
+                # Title analysis
+                title = snippet.get("title", "")
+                title_features = analyze_title_features(title)
 
-                tags_str = ", ".join(snippet.get("tags", []))
+                # Enhanced thumbnail analysis
+                thumbnail_url = snippet.get("thumbnails", {}).get("high", {}).get("url")
+                thumbnail_analysis = analyze_thumbnail_advanced(thumbnail_url, face_cascade)
+
+                # Channel metrics
+                channel_metrics = calculate_channel_metrics(channel_stats, len(video_ids))
+
+                # Tags processing
+                tags_list = snippet.get("tags", [])
+                tags_str = ", ".join(tags_list)
+                tag_count = len(tags_list)
+
+                # Date processing
                 published_at_utc = datetime.fromisoformat(snippet.get("publishedAt").replace("Z", "+00:00"))
                 published_at_jst = published_at_utc.astimezone(datetime.now().astimezone().tzinfo)
 
+                # Compile all data
                 video_details_list.append([
+                    # Basic info
                     item.get("id"),
-                    snippet.get("title"),
+                    title,
                     snippet.get("channelTitle"),
                     published_at_jst.strftime('%Y-%m-%d %H:%M:%S'),
-                    statistics.get("viewCount", 0),
-                    statistics.get("likeCount", 0),
-                    statistics.get("commentCount", 0),
+
+                    # Statistics
+                    int(statistics.get("viewCount", 0)),
+                    int(statistics.get("likeCount", 0)),
+                    int(statistics.get("commentCount", 0)),
+
+                    # Video characteristics
                     duration_sec,
                     length_category,
-                    brightness,
-                    colorfulness,
-                    person,
+
+                    # Original thumbnail features
+                    thumbnail_analysis['brightness'],
+                    thumbnail_analysis['colorfulness'],
+                    thumbnail_analysis['person'],
+
+                    # NEW: RGB values
+                    thumbnail_analysis['r_mean'],
+                    thumbnail_analysis['g_mean'],
+                    thumbnail_analysis['b_mean'],
+
+                    # NEW: Advanced thumbnail features
+                    thumbnail_analysis['text'],
+                    thumbnail_analysis['graphics'],
+                    thumbnail_analysis['image_tags'],
+                    thumbnail_analysis['category_tags'],
+
+                    # NEW: Title features
+                    title_features['title_length'],
+                    title_features['title_word_count'],
+                    title_features['has_numbers'],
+                    title_features['has_caps'],
+                    title_features['has_question'],
+                    title_features['has_exclamation'],
+                    title_features['has_brackets'],
+                    title_features['clickbait_score'],
+
+                    # NEW: Channel/Brand features
+                    channel_stats.get('subscriber_count', 0),
+                    channel_stats.get('total_video_count', 0),
+                    channel_metrics['avg_views_per_video'],
+                    channel_metrics['total_channel_views'],
+
+                    # Tags
+                    tag_count,
                     tags_str,
+
+                    # URL
                     thumbnail_url
                 ])
         except googleapiclient.errors.HttpError as e:
@@ -179,12 +444,38 @@ def get_video_details(youtube, video_ids, face_cascade):
     return video_details_list
 
 def save_to_csv(data, filename):
-    """Saves the collected data to a CSV file."""
+    """Saves the enhanced collected data to a CSV file."""
     header = [
+        # Basic info
         "Video ID", "Title", "Channel Name", "Published At (JST)",
+
+        # Statistics
         "View Count", "Like Count", "Comment Count",
-        "Duration (sec)", "Video Length Category", "Thumbnail Brightness", "Thumbnail Colorfulness", "Person in Thumbnail",
-        "Tags", "Thumbnail URL"
+
+        # Video characteristics
+        "Duration (sec)", "Video Length Category",
+
+        # Original thumbnail features
+        "Thumbnail Brightness", "Thumbnail Colorfulness", "Person in Thumbnail",
+
+        # RGB values (research-based)
+        "Thumbnail R", "Thumbnail G", "Thumbnail B",
+
+        # Advanced thumbnail features (research-based)
+        "Text in Thumbnail", "Graphics in Thumbnail", "Image Tags", "Category Tags",
+
+        # Title features (research-based)
+        "Title Length", "Title Word Count", "Has Numbers", "Has Caps",
+        "Has Question", "Has Exclamation", "Has Brackets", "Clickbait Score",
+
+        # Channel/Brand features (research-based)
+        "Channel Subscribers", "Channel Video Count", "Channel Avg Views", "Channel Total Views",
+
+        # Tags
+        "Tag Count", "Tags",
+
+        # URL
+        "Thumbnail URL"
     ]
     try:
         with open(filename, 'w', newline='', encoding='utf-8-sig') as file:
@@ -192,7 +483,8 @@ def save_to_csv(data, filename):
             writer.writerow(header)
             if data:
                 writer.writerows(data)
-        print(f"✅ Data successfully saved to '{filename}'.")
+        print(f"✅ Enhanced data successfully saved to '{filename}' with {len(header)} features.")
+        print(f"📊 New features added: RGB values, text/graphics detection, title analysis, channel metrics")
     except IOError as e:
         print(f"❌ An error occurred while writing to the file: {e}")
 
@@ -214,7 +506,7 @@ def read_urls_from_file(filename):
 
 # --- Program Execution ---
 if __name__ == "__main__":
-    if API_KEY == "YOUR_API_KEY":
+    if API_KEY == "":
         print("⚠️ Warning: API key is not set. Please replace 'YOUR_API_KEY' in the code with your actual key.")
     else:
         face_cascade = load_face_cascade(CASCADE_FILE_PATH)
@@ -235,9 +527,9 @@ if __name__ == "__main__":
                         print(f"🔍 Extracted {len(video_ids)} valid video IDs.")
 
                 if video_ids:
-                    video_data = get_video_details(youtube, video_ids, face_cascade)
+                    video_data = get_video_details(youtube, video_ids, face_cascade, CHANNEL_ID)
                     if video_data:
-                        print(f"📊 Fetched and analyzed data for {len(video_data)} videos. Saving to CSV file...")
+                        print(f"📊 Fetched and analyzed enhanced data for {len(video_data)} videos. Saving to CSV file...")
                         save_to_csv(video_data, OUTPUT_CSV_FILE)
                     else:
                         print("❌ Failed to fetch data.")
